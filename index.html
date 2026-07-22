@@ -25,8 +25,8 @@ const { useState, useMemo, useEffect } = React;
    Pega la URL /exec de tu Apps Script y el mismo token.
    Vacías = modo local (datos de ejemplo, sin nube).
    ============================================================ */
-const API_URL = "";
-const API_TOKEN = "";
+const API_URL = "https://script.google.com/macros/s/AKfycbyU9Zx_vh5hhxwy2AGICMzNsQP_tJMpKoH4lW44_29gjYcgBHOZIJ8WPq18VM-5w8rSlQ/exec";
+const API_TOKEN = "INV-2026-pR8w";
 const CLOUD = API_URL.length > 10;
 async function apiList(){const r=await fetch(`${API_URL}?action=list&token=${encodeURIComponent(API_TOKEN)}`);const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j.data||[];}
 async function apiSave(rec){const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:API_TOKEN,action:"save",record:rec})});const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j;}
