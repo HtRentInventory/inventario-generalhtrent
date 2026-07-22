@@ -25,8 +25,8 @@ const { useState, useMemo, useEffect } = React;
    Pega la URL /exec de tu Apps Script y el mismo token.
    Vacías = modo local (datos de ejemplo, sin nube).
    ============================================================ */
-const API_URL = "https://script.google.com/macros/s/AKfycbyU9Zx_vh5hhxwy2AGICMzNsQP_tJMpKoH4lW44_29gjYcgBHOZIJ8WPq18VM-5w8rSlQ/exec";
-const API_TOKEN = "INV-2026-pR8w";
+const API_URL = "";
+const API_TOKEN = "";
 const CLOUD = API_URL.length > 10;
 async function apiList(){const r=await fetch(`${API_URL}?action=list&token=${encodeURIComponent(API_TOKEN)}`);const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j.data||[];}
 async function apiSave(rec){const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:API_TOKEN,action:"save",record:rec})});const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j;}
@@ -215,8 +215,8 @@ function EquipoModal({base,onSave,onClose}){
           {tab==="datos" && <>
             <Campo label="NIV"><input value={f.niv} onChange={e=>set("niv",e.target.value)} className={inp+" mono"} placeholder="Número de identificación vehicular"/></Campo>
             <div className="grid grid-cols-2 gap-3">
-              <Campo label="Producto"><select value={f.producto} onChange={e=>set("producto",e.target.value)} className={inp}>{PRODUCTOS.map(t=><option key={t}>{t}</option>)}</select></Campo>
-              <Campo label="Marca"><select value={f.marca} onChange={e=>set("marca",e.target.value)} className={inp}>{MARCAS.map(t=><option key={t}>{t}</option>)}</select></Campo>
+              <Campo label="Producto"><input list="dl-prod" value={f.producto} onChange={e=>set("producto",e.target.value)} className={inp} placeholder="Tipo de equipo"/></Campo>
+              <Campo label="Marca"><input list="dl-marca" value={f.marca} onChange={e=>set("marca",e.target.value)} className={inp} placeholder="Marca"/></Campo>
             </div>
             <div className="grid grid-cols-4 gap-3">
               <Campo label="Año"><input value={f.anio} onChange={e=>set("anio",e.target.value)} className={inp}/></Campo>
@@ -389,6 +389,7 @@ function App(){
   const aniosOpc=useMemo(()=>[...new Set(equipos.map(r=>String(r.anio)).filter(x=>x&&x!=="undefined"))].sort((a,b)=>b.localeCompare(a)),[equipos]);
   const ejesOpc=useMemo(()=>[...new Set(equipos.map(r=>String(r.ejes)).filter(x=>x&&x!=="undefined"))].sort(),[equipos]);
   const clientesOpc=useMemo(()=>[...new Set(equipos.map(r=>r.clienteAsignado).filter(Boolean))].sort(),[equipos]);
+  const productosOpc=useMemo(()=>[...new Set(equipos.map(r=>r.producto).filter(Boolean))].sort(),[equipos]);
   const hayFiltros=fProd!=="Todos"||fMarca!=="Todas"||fAnio!=="Todos"||fEjes!=="Todos"||fUbic!=="Todas"||fAsig!=="Todos"||fEnt!=="Todos"||fCli!=="Todos"||busca;
   const limpiar=()=>{setFProd("Todos");setFMarca("Todas");setFAnio("Todos");setFEjes("Todos");setFUbic("Todas");setFAsig("Todos");setFEnt("Todos");setFCli("Todos");setBusca("");};
   const numUnidades=r=>1;
@@ -418,6 +419,8 @@ function App(){
   return (
     <div className="min-h-screen">
       <datalist id="dl-patio">{PATIOS_SUG.map(p=><option key={p} value={p}/>)}</datalist>
+      <datalist id="dl-prod">{[...new Set([...PRODUCTOS,...productosOpc])].map(p=><option key={p} value={p}/>)}</datalist>
+      <datalist id="dl-marca">{[...new Set([...MARCAS,...marcasOpc])].map(p=><option key={p} value={p}/>)}</datalist>
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <div className="flex items-center gap-3">
@@ -456,7 +459,7 @@ function App(){
               {hayFiltros&&<button onClick={limpiar} className="ml-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200">Limpiar filtros ✕</button>}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-              <Filtro label="Tipo de equipo" value={fProd} onChange={setFProd} options={["Todos",...PRODUCTOS]}/>
+              <Filtro label="Tipo de equipo" value={fProd} onChange={setFProd} options={["Todos",...productosOpc]}/>
               <Filtro label="Marca" value={fMarca} onChange={setFMarca} options={["Todas",...marcasOpc]}/>
               <Filtro label="Año" value={fAnio} onChange={setFAnio} options={["Todos",...aniosOpc]}/>
               <Filtro label="Ejes" value={fEjes} onChange={setFEjes} options={["Todos",...ejesOpc]}/>
@@ -554,4 +557,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
-
