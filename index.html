@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Inventario General · HT Rent</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<style>
+  body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#f1f5f9;}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  ::-webkit-scrollbar{height:8px;width:8px;} ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:9px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+/* ============================================================
+   CONFIGURA AQUÍ TU BACKEND  —  INVENTARIO GENERAL HT RENT
+   Pega la URL /exec de tu Apps Script y el mismo token.
+   Vacías = modo local (datos de ejemplo, sin nube).
+   ============================================================ */
+const API_URL = "https://script.google.com/macros/s/AKfycbyU9Zx_vh5hhxwy2AGICMzNsQP_tJMpKoH4lW44_29gjYcgBHOZIJ8WPq18VM-5w8rSlQ/exec";
+const API_TOKEN = "INV-2026-pR8w";
+const CLOUD = API_URL.length > 10;
+async function apiList(){const r=await fetch(`${API_URL}?action=list&token=${encodeURIComponent(API_TOKEN)}`);const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j.data||[];}
+async function apiSave(rec){const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:API_TOKEN,action:"save",record:rec})});const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j;}
+async function apiBulkChunk(recs,reset){const r=await fetch(API_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:API_TOKEN,action:"bulk",reset:!!reset,records:recs})});const j=await r.json();if(!j.ok)throw new Error(j.error||"error");return j;}
+
+/* ---------------- Constantes (de tu archivo real) ---------------- */
+const PRODUCTOS=["Portacontenedor 40/20","Portacontenedor 40","Plataforma HQ","Plataforma Alta","Caja seca 53\" Regular","Caja seca 53\" Reforzada","Dolly","Góndola","Tolva","Cama baja","Otro"];
+const MARCAS=["ATRO","Forzaco","Otro"];
+const CONDICION=["Nuevo","Usado","Recuperado"];
+const ASIGNACION=["Libre","Asignado","Asignado - Engen","En tránsito"];
+const ENTREGA=["Pendiente","Entregado","Consigna","En tránsito","Resguardo","Subasta RB","Fuera de OP"];
+const TIPOVENTA=["Pendiente","Arrendamiento","Financiamiento","Contado","Renta Pura"];
+const AREAS=["Pendiente","JJ Forza","HT Rent","3C"];
+const MOTIVOS=["Devolución","Fin de contrato","Siniestro","Dación de pago","Falla","Cambio de equipo","Otro"];
+const UBIC_SUG=["Monterrey - JJ","Monterrey - ATRO","Monterrey - HT","Monterrey - Tractomundo","Veracruz - JJ","Veracruz - Fernández","Manzanillo - JJ","Manzanillo - Aligar","Manzanillo - TIM","Lázaro - JJ","Torreón - SITI","Altamira - JJ"];
+const PATIOS_SUG=["Patio MTY","Patio Manzanillo","Patio Veracruz","Patio Lázaro","Patio SITI Torreón","Patio HT","Patio ATRO","Patio Tractomundo","Patio TIM Manzanillo","Patio Fernández Veracruz","Patio Aligar Manzanillo"];
+
+const ASIG_COLOR={"Libre":{chip:"bg-emerald-50 text-emerald-700 border-emerald-200",spine:"bg-emerald-500"},"Asignado":{chip:"bg-indigo-50 text-indigo-700 border-indigo-200",spine:"bg-indigo-500"},"Asignado - Engen":{chip:"bg-violet-50 text-violet-700 border-violet-200",spine:"bg-violet-500"},"En tránsito":{chip:"bg-amber-50 text-amber-800 border-amber-200",spine:"bg-amber-500"}};
+const ENT_COLOR={"Pendiente":{chip:"bg-amber-50 text-amber-800 border-amber-200",spine:"bg-amber-500"},"Entregado":{chip:"bg-teal-50 text-teal-700 border-teal-200",spine:"bg-teal-600"},"Consigna":{chip:"bg-sky-50 text-sky-700 border-sky-200",spine:"bg-sky-500"},"En tránsito":{chip:"bg-amber-50 text-amber-800 border-amber-200",spine:"bg-amber-500"},"Resguardo":{chip:"bg-stone-100 text-stone-600 border-stone-300",spine:"bg-stone-400"},"Subasta RB":{chip:"bg-rose-50 text-rose-700 border-rose-200",spine:"bg-rose-500"},"Fuera de OP":{chip:"bg-stone-100 text-stone-500 border-stone-300",spine:"bg-stone-400"}};
+
+/* ---------------- Utilidades ---------------- */
+const pad=n=>String(n).padStart(2,"0");
+const toISO=dt=>`${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+const HOY=toISO(new Date());
+const parse=s=>{const[y,m,d]=String(s).split("-").map(Number);return new Date(y,(m||1)-1,d||1);};
+const corto=s=>{if(!s)return"";const d=parse(s);return `${d.getDate()} ${["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"][d.getMonth()]} ${d.getFullYear()}`;};
+const quita=k=>String(k==null?"":k).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+const money=n=>{const v=Number(n);if(!v&&v!==0)return"";return v.toLocaleString("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0});};
+
+/* ---------------- Iconos ---------------- */
+function Icon({name,size=16,className=""}){
+  const P={
+    box:'<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
+    truck:'<path d="M10 17h4V5H2v12h3"/><path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5v8h1"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
+    back:'<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v3"/>',
+    chart:'<path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="12" y="6" width="3" height="11"/><rect x="17" y="13" width="3" height="4"/>',
+    search:'<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+    x:'<path d="M18 6 6 18M6 6l12 12"/>',
+    check:'<path d="M20 6 9 17l-5-5"/>',
+    pin:'<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+    cash:'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/>',
+    down:'<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>',
+    tag:'<path d="M20.6 13.4 12 22l-9-9V3h10z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} dangerouslySetInnerHTML={{__html:P[name]||""}}/>;
+}
+
+/* ---------------- Demo ---------------- */
+function demo(seed){
+  let id=seed;
+  const E=o=>({id:id++,niv:"",producto:"Plataforma HQ",marca:"ATRO",anio:"2024",condicion:"Nuevo",ejes:"2",llantas:"8",ejeRetractil:false,ubicacion:"Monterrey - JJ",asignacion:"Libre",entrega:"Pendiente",clienteAsignado:"",folioVenta:"",fechaVenta:"",tipoVenta:"Pendiente",area:"Pendiente",asesor:"",costoProveedor:"",valorComercial:"",factura:"",fechaFactura:"",egreso:false,medioCompra:"Contado",placas:"",verificacion:"",gps:"",comentarios:"",entregas:[],devoluciones:[],...o});
+  return [
+    E({niv:"3ELDKMS44S600060",producto:"Portacontenedor 40/20",marca:"ATRO",anio:"2025",condicion:"Recuperado",ejes:"2",llantas:"2",ejeRetractil:true,ubicacion:"Lázaro - JJ",asignacion:"Libre",entrega:"Pendiente",costoProveedor:"219800",valorComercial:"169400",factura:"A-12523",fechaFactura:"2024-09-26",egreso:true,medioCompra:"Contado"}),
+    E({niv:"3ELDKMS44R600398",producto:"Plataforma HQ",marca:"ATRO",anio:"2024",condicion:"Nuevo",ejes:"3",llantas:"12",ubicacion:"Monterrey - JJ",asignacion:"Asignado",entrega:"Entregado",clienteAsignado:"MARCO ANTONIO CHÁVEZ",folioVenta:"V-3021",fechaVenta:"2024-01-02",tipoVenta:"Arrendamiento",area:"JJ Forza",asesor:"Heber Hernández",costoProveedor:"310000",valorComercial:"265000",factura:"A-11980",egreso:true,
+      entregas:[{id:1,fecha:"2024-01-03",clienteAsignado:"MARCO ANTONIO CHÁVEZ",folioVenta:"V-3021",equipoComercial:"JJ Forza",asesor:"Heber Hernández",patio:"Patio MTY"}]}),
+    E({niv:"3ELDTMS48R600205",producto:"Caja seca 53\" Regular",marca:"ATRO",anio:"2023",condicion:"Usado",ejes:"3",llantas:"12",ubicacion:"Manzanillo - Aligar",asignacion:"Libre",entrega:"Pendiente",clienteAsignado:"",area:"HT Rent",asesor:"",costoProveedor:"280000",valorComercial:"210000",
+      devoluciones:[{id:1,fecha:"2025-08-04",clienteAsignado:"MARGARITO DEL RÍO",folioVenta:"",motivo:"Siniestro",asesor:"",patio:"Patio ATRO",quienInforma:"Adriana García"}]}),
+    E({niv:"3ELDPMS40S600771",producto:"Dolly",marca:"Forzaco",anio:"2022",condicion:"Nuevo",ejes:"1",llantas:"4",ubicacion:"Monterrey - ATRO",asignacion:"Asignado - Engen",entrega:"Consigna",clienteAsignado:"TRANSPORTES DEL NORTE",folioVenta:"V-2810",tipoVenta:"Financiamiento",area:"HT Rent",asesor:"Omar Guevara",costoProveedor:"95000",valorComercial:"78000",egreso:false}),
+    E({niv:"3ELDGMS42S600114",producto:"Góndola",marca:"ATRO",anio:"2025",condicion:"Nuevo",ejes:"3",llantas:"12",ubicacion:"Veracruz - JJ",asignacion:"En tránsito",entrega:"En tránsito",area:"Pendiente",costoProveedor:"340000",valorComercial:"295000"}),
+    E({niv:"3ELDKMS44S600902",producto:"Portacontenedor 40",marca:"ATRO",anio:"2024",condicion:"Nuevo",ejes:"2",llantas:"8",ubicacion:"Monterrey - HT",asignacion:"Asignado",entrega:"Entregado",clienteAsignado:"GLOBAL NAVAL TF",folioVenta:"V-3110",tipoVenta:"Contado",area:"3C",asesor:"Aracely de Ochoa",costoProveedor:"250000",valorComercial:"205000",egreso:true,
+      entregas:[{id:1,fecha:"2026-06-10",clienteAsignado:"GLOBAL NAVAL TF",folioVenta:"V-3110",equipoComercial:"3C",asesor:"Aracely de Ochoa",patio:"Patio MTY"}]}),
+  ];
+}
+
+/* ---------------- Importador del archivo maestro ---------------- */
+const MAP_ASIG={"libre":"Libre","asignado":"Asignado","asignado - engen":"Asignado - Engen","asignado-engen":"Asignado - Engen","en transito":"En tránsito"};
+const MAP_ENT={"pendiente":"Pendiente","entregado":"Entregado","consigna":"Consigna","en transito":"En tránsito","resguardo":"Resguardo","subasta rb":"Subasta RB","fuera de op":"Fuera de OP"};
+function normCat(v,mapa){const k=quita(v);if(!k)return"";return mapa[k]||String(v).trim();}
+function si_(v){const s=quita(v);return s==="si"||s==="x"||s==="true"||s==="1";}
+function isoDe(v){if(v===undefined||v===null||v==="")return"";if(v instanceof Date)return toISO(v);const s=String(v).trim();if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);const d=new Date(s);return isNaN(d.getTime())?"":toISO(d);}
+function leerMaestro(wb){
+  const nombres={};wb.SheetNames.forEach(n=>nombres[quita(n)]=n);
+  const shINV=nombres["inv"];if(!shINV)throw new Error("No encontré la pestaña INV en el archivo.");
+  const aoa=XLSX.utils.sheet_to_json(wb.Sheets[shINV],{header:1,defval:"",cellDates:true});
+  let hrow=-1;
+  for(let i=0;i<Math.min(aoa.length,15);i++){if(quita(aoa[i][0])==="niv"){hrow=i;break;}}
+  if(hrow<0)throw new Error("No encontré la fila de encabezados (columna NIV) en INV.");
+  const hdr=aoa[hrow].map(h=>quita(h));
+  const col=n=>hdr.indexOf(n);
+  const C={niv:col("niv"),producto:col("producto"),marca:col("marca"),anio:col("año")>=0?col("año"):col("ano"),cond:col("nuevo o usado"),ejes:col("n° ejes")>=0?col("n° ejes"):col("no ejes"),llantas:col("llantas"),ejeR:col("eje retractil"),ubic:col("ubicación")>=0?col("ubicación"):col("ubicacion"),asig:col("estatus de asignacion"),ent:col("estatus de entrega"),cli:col("cliente asignado"),folio:col("folio de venta"),fVenta:col("fecha de la venta"),tVenta:col("tipo de venta"),area:col("area comercial"),asesor:col("asesor comercial"),costo:col("costo factura proveedor"),cPreg:col("costo factura pendiente de registrar"),cPcob:col("costo factura pendiente de cobrar"),valor:col("valor comercial contado"),fact:col("factura"),fFact:col("fecha factura"),egreso:col("egreso"),medio:col("medio de compra"),anexos:col("anexos engen"),rep:col("status reparacion"),placas:col("placas"),verif:col("verificacion"),gps:col("gps"),coment:col("comentarios operaciones")};
+  const eqs=[];let id=1;const porNiv={};
+  for(let i=hrow+1;i<aoa.length;i++){
+    const row=aoa[i];const niv=String(row[C.niv]||"").trim();if(!niv)continue;
+    const g=k=>C[k]>=0?row[C[k]]:"";
+    const eq={id:id++,niv,producto:String(g("producto")||"").trim(),marca:String(g("marca")||"").trim(),anio:String(g("anio")||"").trim().replace(/\.0$/,""),condicion:String(g("cond")||"").trim(),ejes:String(g("ejes")||"").trim().replace(/\.0$/,""),llantas:String(g("llantas")||"").trim().replace(/\.0$/,""),ejeRetractil:si_(g("ejeR")),ubicacion:String(g("ubic")||"").trim(),asignacion:normCat(g("asig"),MAP_ASIG)||"Libre",entrega:normCat(g("ent"),MAP_ENT)||"Pendiente",clienteAsignado:String(g("cli")||"").trim(),folioVenta:String(g("folio")||"").trim(),fechaVenta:isoDe(g("fVenta")),tipoVenta:String(g("tVenta")||"").trim()||"Pendiente",area:String(g("area")||"").trim()||"Pendiente",asesor:String(g("asesor")||"").trim(),costoProveedor:String(g("costo")||"").trim(),costoPendReg:String(g("cPreg")||"").trim(),costoPendCobrar:String(g("cPcob")||"").trim(),valorComercial:String(g("valor")||"").trim(),factura:String(g("fact")||"").trim(),fechaFactura:isoDe(g("fFact")),egreso:si_(g("egreso")),medioCompra:String(g("medio")||"").trim(),anexosEngen:String(g("anexos")||"").trim(),statusReparacion:String(g("rep")||"").trim(),placas:String(g("placas")||"").trim(),verificacion:String(g("verif")||"").trim(),gps:String(g("gps")||"").trim(),comentarios:String(g("coment")||"").trim(),entregas:[],devoluciones:[]};
+    eqs.push(eq);porNiv[niv]=eq;
+  }
+  function movs(nombre,builder){
+    const sh=nombres[nombre];if(!sh)return 0;let n=0;
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[sh],{defval:"",cellDates:true});
+    rows.forEach(r0=>{const r={};Object.keys(r0).forEach(k=>r[quita(k)]=r0[k]);
+      const niv=String(r["niv"]||"").trim();if(!niv)return;const eq=porNiv[niv];if(!eq)return;
+      builder(eq,r);n++;});
+    return n;
+  }
+  const nE=movs("entregas",(eq,r)=>{eq.entregas.push({id:eq.entregas.length+1,fecha:isoDe(r["fecha de entrega"]),clienteAsignado:String(r["cliente asignado"]||"").trim(),folioVenta:String(r["folio de venta"]||"").trim(),equipoComercial:String(r["equipo comercial"]||"").trim(),asesor:String(r["asesor comercial"]||"").trim(),patio:String(r["patio de entrega"]||"").trim()});});
+  const nD=movs("devoluciones",(eq,r)=>{eq.devoluciones.push({id:eq.devoluciones.length+1,fecha:isoDe(r["fecha de confirmacion"]||r["fecha de confirmación"]),clienteAsignado:String(r["cliente asignado"]||"").trim(),folioVenta:String(r["folio de venta"]||"").trim(),motivo:String(r["motivo"]||"").trim(),asesor:String(r["asesor comercial"]||"").trim(),patio:String(r["patio de recibo"]||"").trim(),quienInforma:String(r["quien informa"]||"").trim()});});
+  return {eqs,nE,nD};
+}
+
+/* ---------------- Piezas UI ---------------- */
+function Campo({label,children,hint}){return <label className="block"><span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>{children}{hint&&<span className="mt-1 block text-[11px] text-slate-400">{hint}</span>}</label>;}
+const inp="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+function Kpi({icon,label,valor,tono,onClick,activo}){const C=onClick?"button":"div";return <C onClick={onClick} className={`text-left rounded-xl border bg-white px-4 py-3 ${onClick?"hover:bg-slate-50 transition-colors":""} ${activo?"border-indigo-400 ring-2 ring-indigo-200":"border-slate-200"}`}><div className="flex items-center gap-1.5 text-slate-400"><Icon name={icon} size={16}/><span className="text-xs font-medium text-slate-500">{label}</span></div><p className={`mt-1 text-2xl font-bold mono ${tono}`}>{valor}</p></C>;}
+function Chip({txt,map}){const c=(map&&map[txt])||{chip:"bg-slate-100 text-slate-600 border-slate-200"};return <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold ${c.chip}`}>{txt}</span>;}
+function numEquipos(){return 1;}
+function totalMov(eq,tipo){return ((eq[tipo])||[]).length;}
+
+/* ---------------- Tarjeta INV ---------------- */
+function TarjetaEquipo({eq,onEdit}){
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="mono text-sm font-bold text-slate-900 truncate">{eq.niv||"(sin NIV)"}</p>
+          <p className="text-xs text-slate-500 mt-0.5">{eq.producto} · {eq.marca}{eq.anio?` · ${eq.anio}`:""} · {eq.condicion}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0"><Chip txt={eq.asignacion} map={ASIG_COLOR}/><Chip txt={eq.entrega} map={ENT_COLOR}/></div>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-1 text-xs text-slate-600">
+        <div className="flex items-center gap-1.5"><Icon name="pin" size={12} className="text-slate-400"/>{eq.ubicacion||"—"}</div>
+        {eq.clienteAsignado && <div className="flex items-center gap-1.5"><Icon name="user" size={12} className="text-slate-400"/>{eq.clienteAsignado}{eq.folioVenta?` · ${eq.folioVenta}`:""}</div>}
+        {(eq.area&&eq.area!=="Pendiente")&&<div className="flex items-center gap-1.5"><Icon name="tag" size={12} className="text-slate-400"/>{eq.area}{eq.asesor?` · ${eq.asesor}`:""}</div>}
+        {eq.valorComercial&&<div className="flex items-center gap-1.5"><Icon name="cash" size={12} className="text-slate-400"/>Valor: {money(eq.valorComercial)}</div>}
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        <span className="text-[11px] text-slate-400">{totalMov(eq,"entregas")>0&&`${totalMov(eq,"entregas")} entrega(s)`}{totalMov(eq,"entregas")>0&&totalMov(eq,"devoluciones")>0?" · ":""}{totalMov(eq,"devoluciones")>0&&`${totalMov(eq,"devoluciones")} devol.`}</span>
+        <button onClick={()=>onEdit(eq)} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">Abrir</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Modal equipo ---------------- */
+function EquipoModal({base,onSave,onClose}){
+  const [f,setF]=useState({...base,entregas:(base.entregas||[]).map(x=>({...x})),devoluciones:(base.devoluciones||[]).map(x=>({...x}))});
+  const [tab,setTab]=useState("datos");
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+
+  function registrarEntrega(){
+    const mov={id:Date.now(),fecha:HOY,clienteAsignado:f.clienteAsignado||"",folioVenta:f.folioVenta||"",equipoComercial:f.area||"",asesor:f.asesor||"",patio:""};
+    setF(p=>({...p,entregas:[...(p.entregas||[]),mov],entrega:"Entregado",asignacion:p.asignacion==="Libre"?"Asignado":p.asignacion}));setTab("mov");
+  }
+  function registrarDevolucion(){
+    const mov={id:Date.now(),fecha:HOY,clienteAsignado:f.clienteAsignado||"",folioVenta:f.folioVenta||"",motivo:"Devolución",asesor:f.asesor||"",patio:"",quienInforma:""};
+    setF(p=>({...p,devoluciones:[...(p.devoluciones||[]),mov],asignacion:"Libre",entrega:"Pendiente"}));setTab("mov");
+  }
+  const setMov=(arr,i,k,v)=>setF(p=>{const a=[...(p[arr]||[])];a[i]={...a[i],[k]:v};return{...p,[arr]:a};});
+  const delMov=(arr,i)=>setF(p=>({...p,[arr]:(p[arr]||[]).filter((_,x)=>x!==i)}));
+
+  const TB=({id,txt})=><button onClick={()=>setTab(id)} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${tab===id?"bg-slate-900 text-white":"text-slate-600 hover:bg-slate-100"}`}>{txt}</button>;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-3" onClick={onClose}>
+      <div className="my-4 w-full max-w-2xl rounded-2xl bg-white shadow-2xl" onClick={e=>e.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-slate-200 bg-white px-5 py-3">
+          <div><h2 className="text-lg font-bold text-slate-900">Ficha del equipo</h2>{f.niv&&<p className="mono text-xs text-slate-400">{f.niv}</p>}</div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"><Icon name="x" size={20}/></button>
+        </div>
+        <div className="sticky top-[57px] z-10 flex gap-1 border-b border-slate-100 bg-white px-4 py-2"><TB id="datos" txt="Datos"/><TB id="fin" txt="Financiero"/><TB id="mov" txt="Movimientos"/></div>
+
+        <div className="space-y-4 px-5 py-4">
+          {tab==="datos" && <>
+            <Campo label="NIV"><input value={f.niv} onChange={e=>set("niv",e.target.value)} className={inp+" mono"} placeholder="Número de identificación vehicular"/></Campo>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="Producto"><select value={f.producto} onChange={e=>set("producto",e.target.value)} className={inp}>{PRODUCTOS.map(t=><option key={t}>{t}</option>)}</select></Campo>
+              <Campo label="Marca"><select value={f.marca} onChange={e=>set("marca",e.target.value)} className={inp}>{MARCAS.map(t=><option key={t}>{t}</option>)}</select></Campo>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              <Campo label="Año"><input value={f.anio} onChange={e=>set("anio",e.target.value)} className={inp}/></Campo>
+              <Campo label="Condición"><select value={f.condicion} onChange={e=>set("condicion",e.target.value)} className={inp}>{CONDICION.map(t=><option key={t}>{t}</option>)}</select></Campo>
+              <Campo label="N° ejes"><input value={f.ejes} onChange={e=>set("ejes",e.target.value)} className={inp}/></Campo>
+              <Campo label="Llantas"><input value={f.llantas} onChange={e=>set("llantas",e.target.value)} className={inp}/></Campo>
+            </div>
+            <div className="flex items-center gap-4">
+              <button onClick={()=>set("ejeRetractil",!f.ejeRetractil)} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${f.ejeRetractil?"border-indigo-400 bg-indigo-50 text-indigo-700":"border-slate-300 bg-white text-slate-500"}`}>{f.ejeRetractil?"✓ ":""}Eje retráctil</button>
+            </div>
+            <Campo label="Ubicación / Patio"><input list="dl-ubic" value={f.ubicacion} onChange={e=>set("ubicacion",e.target.value)} className={inp} placeholder="Ej. Monterrey - JJ"/><datalist id="dl-ubic">{UBIC_SUG.map(u=><option key={u} value={u}/>)}</datalist></Campo>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="Estatus de asignación"><select value={f.asignacion} onChange={e=>set("asignacion",e.target.value)} className={inp}>{ASIGNACION.map(t=><option key={t}>{t}</option>)}</select></Campo>
+              <Campo label="Estatus de entrega"><select value={f.entrega} onChange={e=>set("entrega",e.target.value)} className={inp}>{ENTREGA.map(t=><option key={t}>{t}</option>)}</select></Campo>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+              <h3 className="text-sm font-bold text-slate-700">Información comercial</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <Campo label="Cliente asignado"><input value={f.clienteAsignado} onChange={e=>set("clienteAsignado",e.target.value)} className={inp}/></Campo>
+                <Campo label="Folio de venta"><input value={f.folioVenta} onChange={e=>set("folioVenta",e.target.value)} className={inp}/></Campo>
+                <Campo label="Fecha de la venta"><input type="date" value={f.fechaVenta} onChange={e=>set("fechaVenta",e.target.value)} className={inp}/></Campo>
+                <Campo label="Tipo de venta"><select value={f.tipoVenta} onChange={e=>set("tipoVenta",e.target.value)} className={inp}>{TIPOVENTA.map(t=><option key={t}>{t}</option>)}</select></Campo>
+                <Campo label="Área comercial"><select value={f.area} onChange={e=>set("area",e.target.value)} className={inp}>{AREAS.map(t=><option key={t}>{t}</option>)}</select></Campo>
+                <Campo label="Asesor comercial"><input value={f.asesor} onChange={e=>set("asesor",e.target.value)} className={inp}/></Campo>
+              </div>
+            </div>
+          </>}
+
+          {tab==="fin" && <>
+            <div className="grid grid-cols-2 gap-3">
+              <Campo label="Costo factura proveedor"><input value={f.costoProveedor} onChange={e=>set("costoProveedor",e.target.value)} className={inp} placeholder="Solo número"/></Campo>
+              <Campo label="Valor comercial contado"><input value={f.valorComercial} onChange={e=>set("valorComercial",e.target.value)} className={inp} placeholder="Solo número"/></Campo>
+              <Campo label="Factura"><input value={f.factura} onChange={e=>set("factura",e.target.value)} className={inp}/></Campo>
+              <Campo label="Fecha factura"><input type="date" value={f.fechaFactura} onChange={e=>set("fechaFactura",e.target.value)} className={inp}/></Campo>
+              <Campo label="Costo pend. de registrar"><input value={f.costoPendReg||""} onChange={e=>set("costoPendReg",e.target.value)} className={inp}/></Campo>
+              <Campo label="Costo pend. de cobrar"><input value={f.costoPendCobrar||""} onChange={e=>set("costoPendCobrar",e.target.value)} className={inp}/></Campo>
+              <Campo label="Medio de compra"><input value={f.medioCompra} onChange={e=>set("medioCompra",e.target.value)} className={inp}/></Campo>
+              <Campo label="Anexos Engen"><input value={f.anexosEngen||""} onChange={e=>set("anexosEngen",e.target.value)} className={inp}/></Campo>
+              <Campo label="Status reparación"><input value={f.statusReparacion||""} onChange={e=>set("statusReparacion",e.target.value)} className={inp}/></Campo>
+              <div className="flex items-end"><button onClick={()=>set("egreso",!f.egreso)} className={`w-full rounded-lg border px-3 py-2 text-sm font-semibold ${f.egreso?"border-teal-400 bg-teal-50 text-teal-700":"border-slate-300 bg-white text-slate-500"}`}>{f.egreso?"✓ ":""}Egreso registrado</button></div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3 space-y-3">
+              <h3 className="text-sm font-bold text-slate-700">Operativo</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <Campo label="Placas"><input value={f.placas} onChange={e=>set("placas",e.target.value)} className={inp}/></Campo>
+                <Campo label="Verificación"><input value={f.verificacion} onChange={e=>set("verificacion",e.target.value)} className={inp}/></Campo>
+                <Campo label="GPS"><input value={f.gps} onChange={e=>set("gps",e.target.value)} className={inp}/></Campo>
+              </div>
+              <Campo label="Comentarios de operaciones"><textarea value={f.comentarios} onChange={e=>set("comentarios",e.target.value)} rows={2} className={inp}/></Campo>
+            </div>
+          </>}
+
+          {tab==="mov" && <>
+            <div className="flex gap-2">
+              <button onClick={registrarEntrega} className="flex-1 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100"><Icon name="truck" size={15} className="inline mr-1"/>Registrar entrega</button>
+              <button onClick={registrarDevolucion} className="flex-1 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"><Icon name="back" size={15} className="inline mr-1"/>Registrar devolución</button>
+            </div>
+            <p className="text-[11px] text-slate-400">Registrar entrega marca el equipo como «Entregado». Registrar devolución lo regresa a «Libre / Pendiente». Ajusta los datos abajo.</p>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-700 mb-2 inline-flex items-center gap-1.5"><Icon name="truck" size={15}/> Entregas</h3>
+              {(f.entregas||[]).length===0 && <p className="text-xs text-slate-400">Sin entregas registradas.</p>}
+              <div className="space-y-2">{(f.entregas||[]).map((m,i)=>(
+                <div key={m.id} className="rounded-lg border border-slate-200 bg-teal-50/30 p-2.5">
+                  <div className="flex items-center justify-between mb-1.5"><span className="text-xs font-bold text-teal-700">Entrega · {corto(m.fecha)}</span><button onClick={()=>delMov("entregas",i)} className="text-slate-400 hover:text-red-500"><Icon name="x" size={14}/></button></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={m.fecha} onChange={e=>setMov("entregas",i,"fecha",e.target.value)} className={inp}/>
+                    <input value={m.patio||""} onChange={e=>setMov("entregas",i,"patio",e.target.value)} list="dl-patio" className={inp} placeholder="Patio de entrega"/>
+                    <input value={m.clienteAsignado||""} onChange={e=>setMov("entregas",i,"clienteAsignado",e.target.value)} className={inp} placeholder="Cliente"/>
+                    <input value={m.folioVenta||""} onChange={e=>setMov("entregas",i,"folioVenta",e.target.value)} className={inp} placeholder="Folio de venta"/>
+                    <input value={m.equipoComercial||""} onChange={e=>setMov("entregas",i,"equipoComercial",e.target.value)} className={inp} placeholder="Equipo comercial"/>
+                    <input value={m.asesor||""} onChange={e=>setMov("entregas",i,"asesor",e.target.value)} className={inp} placeholder="Asesor comercial"/>
+                  </div>
+                </div>))}</div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-bold text-slate-700 mb-2 inline-flex items-center gap-1.5"><Icon name="back" size={15}/> Devoluciones</h3>
+              {(f.devoluciones||[]).length===0 && <p className="text-xs text-slate-400">Sin devoluciones registradas.</p>}
+              <div className="space-y-2">{(f.devoluciones||[]).map((m,i)=>(
+                <div key={m.id} className="rounded-lg border border-slate-200 bg-rose-50/30 p-2.5">
+                  <div className="flex items-center justify-between mb-1.5"><span className="text-xs font-bold text-rose-700">Devolución · {corto(m.fecha)}</span><button onClick={()=>delMov("devoluciones",i)} className="text-slate-400 hover:text-red-500"><Icon name="x" size={14}/></button></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={m.fecha} onChange={e=>setMov("devoluciones",i,"fecha",e.target.value)} className={inp}/>
+                    <select value={m.motivo||"Devolución"} onChange={e=>setMov("devoluciones",i,"motivo",e.target.value)} className={inp}>{MOTIVOS.map(t=><option key={t}>{t}</option>)}</select>
+                    <input value={m.clienteAsignado||""} onChange={e=>setMov("devoluciones",i,"clienteAsignado",e.target.value)} className={inp} placeholder="Cliente"/>
+                    <input value={m.patio||""} onChange={e=>setMov("devoluciones",i,"patio",e.target.value)} list="dl-patio" className={inp} placeholder="Patio de recibo"/>
+                    <input value={m.asesor||""} onChange={e=>setMov("devoluciones",i,"asesor",e.target.value)} className={inp} placeholder="Asesor comercial"/>
+                    <input value={m.quienInforma||""} onChange={e=>setMov("devoluciones",i,"quienInforma",e.target.value)} className={inp} placeholder="Quién informa"/>
+                  </div>
+                </div>))}</div>
+            </div>
+          </>}
+        </div>
+
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 rounded-b-2xl border-t border-slate-200 bg-white px-5 py-3">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100">Cancelar</button>
+          <button onClick={()=>onSave(f)} className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- App ---------------- */
+function App(){
+  const [equipos,setEquipos]=useState(()=>CLOUD?[]:demo(Date.now()));
+  const [cargando,setCargando]=useState(CLOUD);
+  const [sync,setSync]=useState("");
+  const [tab,setTab]=useState("inv");
+  const [busca,setBusca]=useState("");
+  const [fProd,setFProd]=useState("Todos");
+  const [fMarca,setFMarca]=useState("Todas");
+  const [fAnio,setFAnio]=useState("Todos");
+  const [fEjes,setFEjes]=useState("Todos");
+  const [fUbic,setFUbic]=useState("Todas");
+  const [fAsig,setFAsig]=useState("Todos");
+  const [fEnt,setFEnt]=useState("Todos");
+  const [fCli,setFCli]=useState("Todos");
+  const [editando,setEditando]=useState(null);
+
+  useEffect(()=>{if(!CLOUD)return;setCargando(true);apiList().then(d=>{setEquipos(d);setCargando(false);}).catch(e=>{setCargando(false);setSync("⚠ No se pudo cargar: "+e.message);});},[]);
+  const guardar=eq=>{const id=eq.id||(Math.max(0,...equipos.map(x=>x.id))+1);const saved={...eq,id};setEquipos(prev=>prev.some(r=>r.id===id)?prev.map(r=>r.id===id?saved:r):[...prev,saved]);setEditando(null);if(CLOUD){setSync("Guardando…");apiSave(saved).then(()=>setSync("Guardado en la nube ✓")).catch(()=>setSync("⚠ Error al guardar"));}};
+  const nuevo=()=>setEditando({id:0,niv:"",producto:"Plataforma HQ",marca:"ATRO",anio:"",condicion:"Nuevo",ejes:"",llantas:"",ejeRetractil:false,ubicacion:"",asignacion:"Libre",entrega:"Pendiente",clienteAsignado:"",folioVenta:"",fechaVenta:"",tipoVenta:"Pendiente",area:"Pendiente",asesor:"",costoProveedor:"",valorComercial:"",factura:"",fechaFactura:"",egreso:false,medioCompra:"",placas:"",verificacion:"",gps:"",comentarios:"",entregas:[],devoluciones:[]});
+  function recargar(){setSync("Cargando…");apiList().then(d=>{setEquipos(d);setSync("Actualizado ✓");}).catch(e=>setSync("Error: "+e.message));}
+  function onArchivoMaestro(e){const file=e.target.files[0];if(!file)return;const fr=new FileReader();
+    fr.onload=ev=>{try{const wb=XLSX.read(new Uint8Array(ev.target.result),{type:"array",cellDates:true});
+      const {eqs,nE,nD}=leerMaestro(wb);
+      if(!eqs.length){setSync("⚠ No se encontraron equipos (revisa la pestaña INV).");return;}
+      setEquipos(eqs);limpiar();
+      setSync(`Cargados en pantalla: ${eqs.length} equipos · ${nE} entregas · ${nD} devoluciones. Revisa y usa «Carga inicial» para subirlos a la nube.`);
+    }catch(err){setSync("⚠ "+err.message);}};
+    fr.readAsArrayBuffer(file);e.target.value="";}
+  async function cargaInicial(){
+    if(!window.confirm("CARGA INICIAL\n\nReemplaza TODO lo que haya en la nube con lo que ves en pantalla ("+equipos.length+" equipos).\nÚsalo solo la primera vez.\n\n¿Continuar?"))return;
+    const LOTE=400;try{
+      for(let i=0;i<equipos.length;i+=LOTE){
+        setSync(`Subiendo… ${Math.min(i+LOTE,equipos.length)} / ${equipos.length}`);
+        await apiBulkChunk(equipos.slice(i,i+LOTE),i===0);
+      }
+      setSync(`Subido ✓ (${equipos.length} equipos)`);
+    }catch(e){setSync("Error al subir: "+e.message);}
+  }
+
+  const pasa=r=>(fProd==="Todos"||r.producto===fProd)&&(fMarca==="Todas"||r.marca===fMarca)&&(fAnio==="Todos"||String(r.anio)===fAnio)&&(fEjes==="Todos"||String(r.ejes)===fEjes)&&(fUbic==="Todas"||r.ubicacion===fUbic)&&(fAsig==="Todos"||r.asignacion===fAsig)&&(fEnt==="Todos"||r.entrega===fEnt)&&(fCli==="Todos"||r.clienteAsignado===fCli)&&(!busca||quita(r.niv+" "+r.clienteAsignado+" "+r.folioVenta+" "+r.producto+" "+r.asesor).includes(quita(busca)));
+  const visibles=useMemo(()=>equipos.filter(pasa),[equipos,fProd,fMarca,fAnio,fEjes,fUbic,fAsig,fEnt,fCli,busca]);
+  const CAP=300; const capados=visibles.slice(0,CAP);
+
+  const ubicaciones=useMemo(()=>[...new Set(equipos.map(r=>r.ubicacion).filter(Boolean))].sort(),[equipos]);
+  const marcasOpc=useMemo(()=>[...new Set(equipos.map(r=>r.marca).filter(Boolean))].sort(),[equipos]);
+  const aniosOpc=useMemo(()=>[...new Set(equipos.map(r=>String(r.anio)).filter(x=>x&&x!=="undefined"))].sort((a,b)=>b.localeCompare(a)),[equipos]);
+  const ejesOpc=useMemo(()=>[...new Set(equipos.map(r=>String(r.ejes)).filter(x=>x&&x!=="undefined"))].sort(),[equipos]);
+  const clientesOpc=useMemo(()=>[...new Set(equipos.map(r=>r.clienteAsignado).filter(Boolean))].sort(),[equipos]);
+  const hayFiltros=fProd!=="Todos"||fMarca!=="Todas"||fAnio!=="Todos"||fEjes!=="Todos"||fUbic!=="Todas"||fAsig!=="Todos"||fEnt!=="Todos"||fCli!=="Todos"||busca;
+  const limpiar=()=>{setFProd("Todos");setFMarca("Todas");setFAnio("Todos");setFEjes("Todos");setFUbic("Todas");setFAsig("Todos");setFEnt("Todos");setFCli("Todos");setBusca("");};
+  const numUnidades=r=>1;
+  const kTot=equipos.length;
+  const kLibre=equipos.filter(r=>r.asignacion==="Libre").length;
+  const kAsig=equipos.filter(r=>r.asignacion&&r.asignacion.indexOf("Asignado")===0).length;
+  const kEntreg=equipos.filter(r=>r.entrega==="Entregado").length;
+  const kPend=equipos.filter(r=>r.entrega==="Pendiente").length;
+
+  const todasEntregas=useMemo(()=>{const a=[];equipos.forEach(e=>(e.entregas||[]).forEach(m=>a.push({...m,niv:e.niv,producto:e.producto,marca:e.marca})));return a.sort((x,y)=>(y.fecha||"").localeCompare(x.fecha||""));},[equipos]);
+  const todasDevol=useMemo(()=>{const a=[];equipos.forEach(e=>(e.devoluciones||[]).forEach(m=>a.push({...m,niv:e.niv,producto:e.producto,marca:e.marca})));return a.sort((x,y)=>(y.fecha||"").localeCompare(x.fecha||""));},[equipos]);
+
+  function agrupa(campo){const c={};equipos.forEach(e=>{const k=e[campo]||"(sin dato)";c[k]=(c[k]||0)+1;});return Object.entries(c).sort((a,b)=>b[1]-a[1]);}
+
+  function exportar(){
+    const filas=equipos.map(r=>({"NIV":r.niv,"Producto":r.producto,"Marca":r.marca,"Año":r.anio,"Condición":r.condicion,"Ejes":r.ejes,"Llantas":r.llantas,"Eje retráctil":r.ejeRetractil?"SI":"NO","Ubicación":r.ubicacion,"Estatus asignación":r.asignacion,"Estatus entrega":r.entrega,"Cliente asignado":r.clienteAsignado,"Folio de venta":r.folioVenta,"Fecha venta":r.fechaVenta,"Tipo de venta":r.tipoVenta,"Área comercial":r.area,"Asesor":r.asesor,"Costo proveedor":r.costoProveedor,"Valor comercial":r.valorComercial,"Factura":r.factura,"Egreso":r.egreso?"SI":"NO","Costo pend. registrar":r.costoPendReg||"","Costo pend. cobrar":r.costoPendCobrar||"","Anexos Engen":r.anexosEngen||"","Status reparación":r.statusReparacion||"","Placas":r.placas,"Verificación":r.verificacion,"GPS":r.gps,"# Entregas":(r.entregas||[]).length,"# Devoluciones":(r.devoluciones||[]).length,"Comentarios":r.comentarios}));
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(filas),"INV");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(todasEntregas.map(m=>({"NIV":m.niv,"Producto":m.producto,"Fecha":m.fecha,"Cliente":m.clienteAsignado,"Folio":m.folioVenta,"Equipo comercial":m.equipoComercial,"Asesor":m.asesor,"Patio":m.patio}))),"ENTREGAS");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(todasDevol.map(m=>({"NIV":m.niv,"Producto":m.producto,"Fecha":m.fecha,"Cliente":m.clienteAsignado,"Motivo":m.motivo,"Asesor":m.asesor,"Patio":m.patio,"Quién informa":m.quienInforma}))),"DEVOLUCIONES");
+    XLSX.writeFile(wb,"inventario_htrent.xlsx");
+  }
+
+  const TABS=[["inv","INV","box"],["entregas","Entregas","truck"],["devoluciones","Devoluciones","back"],["resumen","Resumen","chart"]];
+
+  return (
+    <div className="min-h-screen">
+      <datalist id="dl-patio">{PATIOS_SUG.map(p=><option key={p} value={p}/>)}</datalist>
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-white"><Icon name="box" size={22}/></div>
+            <div><h1 className="text-xl font-bold text-slate-900 leading-tight">Inventario General</h1><p className="text-xs font-medium uppercase tracking-wider text-indigo-600">OPERACIONES · HT RENT</p></div>
+          </div>
+          <button onClick={nuevo} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"><Icon name="plus" size={18}/>Nuevo equipo</button>
+        </div>
+        <div className="mx-auto max-w-6xl px-5"><div className="flex gap-1 -mb-px">{TABS.map(([k,l,ic])=><button key={k} onClick={()=>setTab(k)} className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold ${tab===k?"border-indigo-600 text-indigo-700":"border-transparent text-slate-500 hover:text-slate-700"}`}><Icon name={ic} size={15}/>{l}</button>)}</div></div>
+      </header>
+
+      <main className="mx-auto max-w-6xl px-5 py-5">
+        <div className="mb-5 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Icon name="box" size={16}/>Subir archivo maestro (.xlsm/.xlsx)<input type="file" accept=".xlsm,.xlsx,.xls,.csv" onChange={onArchivoMaestro} className="hidden"/></label>
+            <button onClick={exportar} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Icon name="down" size={16}/>Exportar Excel</button>
+            {!CLOUD && <button onClick={()=>{setEquipos(demo(Date.now()));}} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Datos de ejemplo</button>}
+            {CLOUD && <div className="flex flex-wrap items-center gap-2 border-l border-slate-200 pl-2"><span className="text-xs font-semibold text-slate-500">Nube:</span><button onClick={recargar} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50">Recargar</button><button onClick={cargaInicial} className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100">Carga inicial (reemplaza)</button>{sync&&<span className="text-xs font-medium text-slate-600">{sync}</span>}</div>}
+            {!CLOUD && <span className="text-xs text-slate-400 ml-1">Modo local · pega tu URL y token en el archivo para activar la nube</span>}
+          </div>
+        </div>
+        {cargando && <div className="mb-4 rounded-lg bg-sky-50 text-sky-700 px-3 py-2 text-sm font-medium">Cargando datos de la nube…</div>}
+
+        {tab==="inv" && <>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+            <Kpi icon="box" label="Total equipos" valor={kTot} tono="text-slate-900"/>
+            <Kpi icon="check" label="Libres" valor={kLibre} tono="text-emerald-600" onClick={()=>setFAsig(fAsig==="Libre"?"Todos":"Libre")} activo={fAsig==="Libre"}/>
+            <Kpi icon="user" label="Asignados" valor={kAsig} tono="text-indigo-600"/>
+            <Kpi icon="truck" label="Entregados" valor={kEntreg} tono="text-teal-600"/>
+            <Kpi icon="tag" label="Pendientes" valor={kPend} tono="text-amber-600"/>
+          </div>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="relative flex-1 max-w-md"><Icon name="search" size={15} className="absolute left-2.5 top-2.5 text-slate-400"/><input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar NIV, cliente, folio, producto…" className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm outline-none focus:border-indigo-400"/></div>
+              {hayFiltros&&<button onClick={limpiar} className="ml-2 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-200">Limpiar filtros ✕</button>}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+              <Filtro label="Tipo de equipo" value={fProd} onChange={setFProd} options={["Todos",...PRODUCTOS]}/>
+              <Filtro label="Marca" value={fMarca} onChange={setFMarca} options={["Todas",...marcasOpc]}/>
+              <Filtro label="Año" value={fAnio} onChange={setFAnio} options={["Todos",...aniosOpc]}/>
+              <Filtro label="Ejes" value={fEjes} onChange={setFEjes} options={["Todos",...ejesOpc]}/>
+              <Filtro label="Ubicación" value={fUbic} onChange={setFUbic} options={["Todas",...ubicaciones]}/>
+              <Filtro label="Asignación" value={fAsig} onChange={setFAsig} options={["Todos",...new Set([...ASIGNACION,...equipos.map(r=>r.asignacion).filter(Boolean)])]}/>
+              <Filtro label="Entrega" value={fEnt} onChange={setFEnt} options={["Todos",...new Set([...ENTREGA,...equipos.map(r=>r.entrega).filter(Boolean)])]}/>
+              <Filtro label="Cliente" value={fCli} onChange={setFCli} options={["Todos",...clientesOpc]}/>
+            </div>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">Mostrando <span className="font-bold mono">{capados.length}</span> de <span className="font-bold mono">{visibles.length}</span> equipos{visibles.length>CAP&&" · refina la búsqueda para ver el resto"}.</p>
+          {capados.length?<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{capados.map(eq=><TarjetaEquipo key={eq.id} eq={eq} onEdit={setEditando}/>)}</div>:<Vacio txt="No hay equipos con los filtros actuales."/>}
+        </>}
+
+        {tab==="entregas" && <ListaMov titulo="Entregas registradas" items={todasEntregas} color="text-teal-700" campos={[["clienteAsignado","Cliente"],["folioVenta","Folio"],["equipoComercial","Equipo com."],["asesor","Asesor"],["patio","Patio"]]}/>}
+        {tab==="devoluciones" && <ListaMov titulo="Devoluciones registradas" items={todasDevol} color="text-rose-700" campos={[["clienteAsignado","Cliente"],["motivo","Motivo"],["asesor","Asesor"],["patio","Patio"],["quienInforma","Informa"]]}/>}
+
+        {tab==="resumen" && <Resumen equipos={equipos} agrupa={agrupa} entregas={todasEntregas} devol={todasDevol} kpis={{kTot,kLibre,kAsig,kEntreg,kPend}}/>}
+      </main>
+
+      {editando && <EquipoModal base={editando} onSave={guardar} onClose={()=>setEditando(null)}/>}
+    </div>
+  );
+}
+
+function Filtro({label,value,onChange,options}){
+  const activo=value!=="Todos"&&value!=="Todas";
+  return (<label className="block min-w-0">
+    <span className={`mb-0.5 block truncate text-[10px] font-bold uppercase tracking-wide ${activo?"text-indigo-600":"text-slate-400"}`}>{label}</span>
+    <select value={value} onChange={e=>onChange(e.target.value)} className={`w-full rounded-lg border px-2 py-1.5 text-xs ${activo?"border-indigo-400 bg-indigo-50 font-semibold text-indigo-800":"border-slate-300 bg-white text-slate-700"}`}>{options.map(o=><option key={o}>{o}</option>)}</select>
+  </label>);
+}
+function ListaMov({titulo,items,color,campos}){
+  const [q,setQ]=useState("");
+  const fil=items.filter(m=>!q||quita((m.niv||"")+" "+(m.clienteAsignado||"")+" "+(m.folioVenta||"")).includes(quita(q)));
+  return (<div>
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-bold text-slate-900">{titulo} <span className="text-sm font-normal text-slate-400">({fil.length})</span></h2>
+      <div className="relative"><Icon name="search" size={15} className="absolute left-2.5 top-2.5 text-slate-400"/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="NIV, cliente, folio…" className="w-64 rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm outline-none focus:border-indigo-400"/></div></div>
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <table className="w-full text-sm"><thead className="bg-slate-50 text-left text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Fecha</th><th className="px-3 py-2">NIV</th><th className="px-3 py-2">Producto</th>{campos.map(([k,l])=><th key={k} className="px-3 py-2">{l}</th>)}</tr></thead>
+      <tbody className="divide-y divide-slate-100">{fil.slice(0,400).map((m,i)=>(<tr key={i} className="hover:bg-slate-50">
+        <td className="px-3 py-2 whitespace-nowrap">{corto(m.fecha)}</td><td className="px-3 py-2 mono font-semibold">{m.niv}</td><td className="px-3 py-2">{m.producto}</td>
+        {campos.map(([k])=><td key={k} className="px-3 py-2">{m[k]||"—"}</td>)}
+      </tr>))}</tbody></table>
+      {fil.length===0&&<p className="py-10 text-center text-sm text-slate-400">Sin registros.</p>}
+    </div>
+  </div>);
+}
+
+function Resumen({equipos,agrupa,entregas,devol,kpis}){
+  const Barras=({titulo,datos,tono})=>{const max=Math.max(1,...datos.map(d=>d[1]));return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <h3 className="text-sm font-bold text-slate-700 mb-3">{titulo}</h3>
+      <div className="space-y-2">{datos.slice(0,10).map(([k,v])=>(
+        <div key={k} className="flex items-center gap-2 text-xs"><span className="w-40 truncate text-slate-600">{k}</span><div className="flex-1 h-4 rounded bg-slate-100 overflow-hidden"><div className={`h-full ${tono}`} style={{width:`${v/max*100}%`}}></div></div><span className="w-10 text-right mono font-bold text-slate-700">{v}</span></div>))}</div>
+    </div>);};
+  return (<div className="space-y-5">
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <Kpi icon="box" label="Total equipos" valor={kpis.kTot} tono="text-slate-900"/>
+      <Kpi icon="check" label="Libres" valor={kpis.kLibre} tono="text-emerald-600"/>
+      <Kpi icon="user" label="Asignados" valor={kpis.kAsig} tono="text-indigo-600"/>
+      <Kpi icon="truck" label="Entregados" valor={kpis.kEntreg} tono="text-teal-600"/>
+      <Kpi icon="tag" label="Pendientes" valor={kpis.kPend} tono="text-amber-600"/>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Barras titulo="Equipos por ubicación / patio" datos={agrupa("ubicacion")} tono="bg-indigo-500"/>
+      <Barras titulo="Equipos por producto" datos={agrupa("producto")} tono="bg-teal-500"/>
+      <Barras titulo="Equipos por área comercial" datos={agrupa("area")} tono="bg-violet-500"/>
+      <Barras titulo="Equipos por estatus de entrega" datos={agrupa("entrega")} tono="bg-amber-500"/>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-sm font-bold text-slate-700 mb-2 inline-flex items-center gap-1.5"><Icon name="truck" size={15}/> Últimas entregas</h3>{entregas.slice(0,6).map((m,i)=><div key={i} className="flex justify-between border-t border-slate-100 py-1.5 text-xs"><span className="mono">{m.niv}</span><span className="text-slate-500">{m.clienteAsignado||"—"}</span><span className="text-slate-400">{corto(m.fecha)}</span></div>)}{entregas.length===0&&<p className="text-xs text-slate-400 py-2">Sin entregas.</p>}</div>
+      <div className="rounded-xl border border-slate-200 bg-white p-4"><h3 className="text-sm font-bold text-slate-700 mb-2 inline-flex items-center gap-1.5"><Icon name="back" size={15}/> Últimas devoluciones</h3>{devol.slice(0,6).map((m,i)=><div key={i} className="flex justify-between border-t border-slate-100 py-1.5 text-xs"><span className="mono">{m.niv}</span><span className="text-slate-500">{m.motivo||"—"}</span><span className="text-slate-400">{corto(m.fecha)}</span></div>)}{devol.length===0&&<p className="text-xs text-slate-400 py-2">Sin devoluciones.</p>}</div>
+    </div>
+  </div>);
+}
+
+function Vacio({txt}){return <div className="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center"><Icon name="box" size={30} className="mx-auto text-slate-300"/><p className="mt-2 text-sm text-slate-400">{txt}</p></div>;}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
